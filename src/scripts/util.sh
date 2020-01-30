@@ -59,7 +59,8 @@ auto_enable_configs() {
 # Helper function to ask certbot for the given domain(s).  Must have defined the
 # EMAIL environment variable, to register the proper support email address.
 get_certificate() {
-    echo "Getting certificate for domain $1 on behalf of user $2"
+    local domain="$1" email="$2" plugin_opts
+    echo "Getting certificate for domain ${domain} on behalf of user ${email}"
     PRODUCTION_URL='https://acme-v02.api.letsencrypt.org/directory'
     STAGING_URL='https://acme-staging-v02.api.letsencrypt.org/directory'
 
@@ -71,10 +72,29 @@ get_certificate() {
         echo "Production ..."
     fi
 
+    if [ "$CERTBOT_DNS" != "" ]; then
+        set +x # do not log credentials
+        case "$CERTBOT_DNS" in
+            route53)
+                if [ -z "$AWS_ACCESS_KEY_ID" -o -z "$AWS_SECRET_ACCESS_KEY" ]; then
+                    error "To use route53 plugin set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY"
+                    return 1
+                fi;;
+        esac
+        set -x
+
+        if ! echo ${domain} | grep -q '^\*\.'; then
+            domain="*.${domain}"
+        fi
+        plugin_opts=(--preferred-challenges dns --dns-${CERTBOT_DNS})
+    else
+        plugin_opts=(--preferred-challenges http-01 --http-01-port 1337 --standalone)
+    fi
+
     echo "running certbot ... $letsencrypt_url $1 $2"
-    certbot certonly --agree-tos --keep -n --text --email $2 --server \
-        $letsencrypt_url -d $1 --http-01-port 1337 \
-        --standalone --preferred-challenges http-01 --debug
+    certbot certonly --agree-tos --keep -n --debug \
+        --email $email --server $letsencrypt_url -d $domain \
+        ${plugin_opts[@]}
 }
 
 # Given a domain name, return true if a renewal is required (last renewal
@@ -83,7 +103,7 @@ is_renewal_required() {
     # If the file does not exist assume a renewal is required
     last_renewal_file="/etc/letsencrypt/live/$1/privkey.pem"
     [ ! -e "$last_renewal_file" ] && return;
-    
+
     # If the file exists, check if the last renewal was more than a week ago
     one_week_sec=604800
     now_sec=$(date -d now +%s)
@@ -115,4 +135,11 @@ template_user_configs() {
             envsubst "${DENV}" <"${conf}" > "${TARGET_DIR}/$(basename ${conf})"
         done
     fi
+}
+
+# Follow principle of least privilege when running nginx
+# remove any credentials from the environment
+setup_nginx_env() {
+  unset AWS_ACCESS_KEY_ID
+  unset AWS_SECRET_ACCESS_KEY
 }
