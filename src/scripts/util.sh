@@ -20,6 +20,12 @@ parse_domains() {
     done
 }
 
+# Check if wildcard certificate is required for given domain
+# Currenly it only checks if thereis "server_name *.DOMAIN;" in config.
+need_wildcard_cert() {
+    grep -qE '^\s*server_name\s*([-a-z0-9.]+\s+)*\*\.'${1//\./\\.}'(\s+[-a-z0-9.]+)*;' /etc/nginx/conf.d/*.conf*
+}
+
 # Given a config file path, spit out all the ssl_certificate_key file paths
 parse_keyfiles() {
     sed -n -e 's&^\s*ssl_certificate_key\s*\(.*\);&\1&p' "$1"
@@ -59,7 +65,8 @@ auto_enable_configs() {
 # Helper function to ask certbot for the given domain(s).  Must have defined the
 # EMAIL environment variable, to register the proper support email address.
 get_certificate() {
-    local domain="$1" email="$2" plugin_opts
+    local domain="$1" email="$2"
+    local -a plugin_opts domain_opts=(-d ${domain})
     echo "Getting certificate for domain ${domain} on behalf of user ${email}"
     PRODUCTION_URL='https://acme-v02.api.letsencrypt.org/directory'
     STAGING_URL='https://acme-staging-v02.api.letsencrypt.org/directory'
@@ -83,18 +90,23 @@ get_certificate() {
         esac
         set -x
 
-        if ! echo ${domain} | grep -q '^\*\.'; then
-            domain="*.${domain}"
-        fi
         plugin_opts=(--preferred-challenges dns --dns-${CERTBOT_DNS})
     else
         plugin_opts=(--preferred-challenges http-01 --http-01-port 1337 --standalone)
     fi
 
+    if need_wildcard_cert ${domain}; then
+        if [ "$CERTBOT_DNS" = "" ]; then
+            error "To generate wildcard certificate a DNS plugin is required"
+            return 1
+        fi
+        domain_opts+=(-d "*.${domain}")
+    fi
+
     echo "running certbot ... $letsencrypt_url $1 $2"
     certbot certonly --agree-tos --keep -n --debug \
-        --email $email --server $letsencrypt_url -d $domain \
-        ${plugin_opts[@]}
+        --email $email --server $letsencrypt_url \
+        ${domain_opts[@]} ${plugin_opts[@]}
 }
 
 # Given a domain name, return true if a renewal is required (last renewal
