@@ -13,3 +13,10 @@ build: Makefile Dockerfile
 
 push:
 	docker push staticfloat/nginx-certbot
+
+build_route53: Makefile Dockerfile
+	$(DOCKER_BUILD) -t lispmachine/nginx-certbot-route53 --build-arg CERTBOT_PLUGINS=route53 .
+
+push_route53:
+	docker push lispmachine/nginx-certbot-route53
+

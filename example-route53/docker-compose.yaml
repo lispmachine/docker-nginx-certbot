@@ -1,0 +1,15 @@
+
+version: '3.2'
+services:
+  nginx:
+    image: lispmachine/nginx-certbot-route53
+    restart: always
+    environment:
+      CERTBOT_EMAIL: "your.email@example.com"
+      CERTBOT_DNS: route53
+      IS_STAGING: 1
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./conf.d:/etc/nginx/user.conf.d:ro
